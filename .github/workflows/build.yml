@@ -1,0 +1,48 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KiruBill-win64-msvc
+          path: build/Release/KiruBill.exe
+
+  windows-mingw:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MinGW-w64
+        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64 cmake
+      - name: Build
+        run: |
+          cmake -B build-win64 -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-win64 -j
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KiruBill-win64-mingw
+          path: build-win64/KiruBill.exe
+
+  linux-sdl2:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libfreetype-dev cmake
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+      - name: Replay regression test (20 original replays must reproduce the original scores)
+        run: python3 tests/run_replays.py build/KiruBill game
