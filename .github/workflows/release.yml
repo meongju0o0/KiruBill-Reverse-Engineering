@@ -1,0 +1,79 @@
+name: release
+
+# Builds the Windows x64 package and publishes a GitHub Release.
+# Run it from the Actions tab ("Run workflow", enter a tag such as v1.0.1)
+# or push a tag named v*.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag (e.g. v1.0.0)
+        required: true
+        default: v1.0.0
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  replay-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libfreetype-dev cmake
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+      - name: 20 original replays must reproduce the original scores
+        run: python3 tests/run_replays.py build/KiruBill game
+
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MinGW-w64
+        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64 cmake zip
+      - name: Build Windows x64
+        run: |
+          cmake -B build-win64 -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-win64 -j
+      - name: Package
+        run: |
+          mkdir -p dist/KiruBill
+          cp build-win64/KiruBill.exe dist/KiruBill/
+          cp -r game/image game/sound game/data game/save dist/KiruBill/
+          cp .github/release/README.txt dist/KiruBill/
+          (cd dist && zip -r -9 KiruBill-win64.zip KiruBill)
+          cp build-win64/KiruBill.exe dist/KiruBill.exe
+          (cd dist && sha256sum KiruBill-win64.zip KiruBill.exe > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: |
+            dist/KiruBill-win64.zip
+            dist/KiruBill.exe
+            dist/SHA256SUMS.txt
+
+  publish:
+    needs: [replay-test, package]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: dist
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/KiruBill-win64.zip dist/KiruBill.exe dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "건물 부시기 (斬るビル) Windows 11 x64 $TAG" \
+            --notes-file .github/release/NOTES.md

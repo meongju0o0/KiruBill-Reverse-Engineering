@@ -14,6 +14,9 @@
 
 ## 실행 방법 (Windows 10/11 64비트)
 
+**가장 쉬운 방법:** [Releases](https://github.com/meongju0o0/Destroy-Building-Reverse-Engineering/releases)에서
+`KiruBill-win64.zip`을 받아 압축을 풀고 `KiruBill\KiruBill.exe`를 실행하세요.
+
 이 저장소의 [`game/`](game) 폴더에 원본 게임 데이터와 미리 빌드한 실행 파일이 함께 들어 있습니다.
 
 1. 저장소를 내려받습니다 (GitHub의 **Code → Download ZIP** 또는 `git clone`).
@@ -83,6 +86,11 @@ sudo apt install g++-mingw-w64-x86-64 cmake
 cmake -B build-win64 -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64-x86_64.cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build-win64 -j
 ```
+
+### 릴리스 만들기
+
+GitHub Actions의 **release** 워크플로를 실행(Run workflow, 태그 입력)하거나 `v*` 태그를 푸시하면
+리플레이 검증 → Windows x64 빌드 → `KiruBill-win64.zip` 패키징 → GitHub Release 게시가 자동으로 진행됩니다.
 
 ### Linux / macOS (SDL2, 개발·테스트용)
 
