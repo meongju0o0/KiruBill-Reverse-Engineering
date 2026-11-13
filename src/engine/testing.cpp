@@ -93,6 +93,12 @@ void test_parse_args(const std::vector<std::string>& args)
             g_opts.windowed = false;
         else if (a == "--gdi")
             g_opts.force_gdi = true;
+        else if (a == "--no-vsync")
+            g_opts.vsync = false;
+        else if (a == "--nearest")
+            g_opts.nearest = true;
+        else if (a == "--integer")
+            g_opts.integer_scale = true;
         else if (a == "--headless")
             g_opts.headless = true;
         else if (a == "--trace")

@@ -48,12 +48,19 @@
 |---|---|
 | `-window` | 창 모드로 시작 (기본은 테두리 없는 전체화면, 4:3 비율 유지) |
 | `--gdi` | OpenGL 대신 GDI로 화면 출력 (그래픽 드라이버 문제 시) |
+| `--integer` | 정수 배율(2×, 3×…)로만 확대, 남는 부분은 검은 테두리 |
+| `--nearest` | 부드러운 보정 없이 최근접 픽셀 확대 |
+| `--no-vsync` | 수직 동기화 끄기 |
+
+화면은 원본처럼 수직 동기화(vsync)에 맞춰 출력하고, 640×480을 정수 배율로 먼저 키운 뒤 남는 비율만
+부드럽게 보정합니다(sharp bilinear). 1080p처럼 2.25배가 되는 화면에서 스크롤할 때 줄이 떨려 보이는 현상을 막기 위해서입니다.
+건물이 떨어지거나 보스가 착지할 때 화면 전체가 좌우로 흔들리는 것(약 0.25초)은 원본의 지진 연출입니다.
 
 ## 원본에서 바뀐 점 (Windows 11 대응)
 
 | 원본 | 포트 |
 |---|---|
-| DirectDraw 640×480×8bit 독점 전체화면, 해상도 변경 | 8비트 화면을 소프트웨어로 똑같이 합성한 뒤 32비트로 변환해 OpenGL(실패 시 GDI)로 출력. 해상도 변경 없음, 4:3 레터박스 |
+| DirectDraw 640×480×8bit 독점 전체화면, 해상도 변경 | 8비트 화면을 소프트웨어로 똑같이 합성한 뒤 32비트로 변환해 OpenGL(실패 시 GDI)로 출력. 해상도 변경 없음, 4:3 레터박스, vsync, sharp bilinear 확대 |
 | DirectMusic (MIDI, 루프 포인트) | 자체 MIDI 시퀀서 + Windows 기본 MIDI 신스(Microsoft GS Wavetable Synth, DirectMusic과 같은 Roland GS 음색). 루프 구간(DirectMusic MUSIC_TIME)과 루프 경계 음표 처리까지 재현 |
 | DirectSound | 그대로 DirectSound (원본과 같은 버퍼 플래그·재생 방식) |
 | GetKeyboardState / joyGetPosEx | 그대로 사용 (조이스틱 핫플러그 추가) |

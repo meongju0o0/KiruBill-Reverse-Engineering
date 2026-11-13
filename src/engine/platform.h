@@ -54,6 +54,9 @@ std::string plat_sjis_to_utf8(const char* sjis, int len);
 struct PlatOptions {
     bool windowed = false;
     bool force_gdi = false;  // Windows: present with GDI instead of OpenGL
+    bool vsync = true;       // present on the vertical blank like the original Flip()
+    bool nearest = false;    // plain nearest-neighbour scaling (default: sharp bilinear)
+    bool integer_scale = false; // only whole multiples of 640x480
     bool headless = false;   // no window / audio (automated testing)
     int  max_frames = -1;    // stop after N game frames (headless testing)
     bool trace = false;      // print scene changes and score (testing)

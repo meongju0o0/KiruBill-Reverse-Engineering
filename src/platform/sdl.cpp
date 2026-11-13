@@ -171,7 +171,7 @@ bool plat_video_init()
                              SDL_WINDOW_RESIZABLE | (g_fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0));
     if (!g_win)
         return false;
-    g_ren = SDL_CreateRenderer(g_win, -1, 0);
+    g_ren = SDL_CreateRenderer(g_win, -1, g_opts.vsync ? SDL_RENDERER_PRESENTVSYNC : 0);
     if (!g_ren)
         return false;
     SDL_RenderSetLogicalSize(g_ren, GFX_W, GFX_H);

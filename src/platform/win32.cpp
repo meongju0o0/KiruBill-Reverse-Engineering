@@ -21,6 +21,7 @@
 #include <GL/gl.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -90,7 +91,10 @@ void present_to(HDC dc)
 #endif
 HDC    g_gl_dc;
 HGLRC  g_glrc;
-GLuint g_gl_tex;
+GLuint g_gl_tex;              // 640x480 frame (stored in a 1024x512 texture)
+GLuint g_gl_tex2;             // frame pre-scaled by an integer factor (sharp bilinear)
+int    g_gl_tex2_w = 0, g_gl_tex2_h = 0;
+GLint  g_gl_max_tex = 1024;
 bool   g_gl = false;
 
 bool gl_init()
@@ -109,11 +113,15 @@ bool gl_init()
     g_glrc = wglCreateContext(g_gl_dc);
     if (!g_glrc || !wglMakeCurrent(g_gl_dc, g_glrc))
         return false;
-    // no vsync: the game paces itself with timeGetTime like the original
+    // The original flipped on the vertical blank (Flip(DDFLIP_WAIT)), so the
+    // port presents with vsync as well; without it a tear line hovers in the
+    // middle of the screen while the camera scrolls.  The game still paces
+    // itself with timeGetTime exactly like the original (--no-vsync turns it off).
     typedef BOOL(WINAPI * SwapIntervalFn)(int);
     auto swap_interval = (SwapIntervalFn)(void*)wglGetProcAddress("wglSwapIntervalEXT");
     if (swap_interval)
-        swap_interval(0);
+        swap_interval(g_opts.vsync ? 1 : 0);
+    glGetIntegerv(GL_MAX_TEXTURE_SIZE, &g_gl_max_tex);
     glGenTextures(1, &g_gl_tex);
     glBindTexture(GL_TEXTURE_2D, g_gl_tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -135,6 +143,8 @@ void gl_shutdown()
     if (g_glrc) {
         if (g_gl_tex)
             glDeleteTextures(1, &g_gl_tex);
+        if (g_gl_tex2)
+            glDeleteTextures(1, &g_gl_tex2);
         wglMakeCurrent(nullptr, nullptr);
         wglDeleteContext(g_glrc);
     }
@@ -143,7 +153,31 @@ void gl_shutdown()
     g_glrc = nullptr;
     g_gl_dc = nullptr;
     g_gl_tex = 0;
+    g_gl_tex2 = 0;
+    g_gl_tex2_w = g_gl_tex2_h = 0;
     g_gl = false;
+}
+
+// Draws a texture over the current viewport.  `flip` = texture row 0 is the
+// top of the picture (uploaded frame) instead of the bottom (copied frame).
+void gl_quad(GLuint tex, float u, float v, bool flip)
+{
+    glBindTexture(GL_TEXTURE_2D, tex);
+    const float vb = flip ? v : 0.f, vt = flip ? 0.f : v;
+    glBegin(GL_QUADS);
+    glTexCoord2f(0, vb); glVertex2f(-1, -1);
+    glTexCoord2f(u, vb); glVertex2f(1, -1);
+    glTexCoord2f(u, vt); glVertex2f(1, 1);
+    glTexCoord2f(0, vt); glVertex2f(-1, 1);
+    glEnd();
+}
+
+int pow2_at_least(int n)
+{
+    int p = 1;
+    while (p < n)
+        p <<= 1;
+    return p;
 }
 
 void gl_present()
@@ -153,24 +187,63 @@ void gl_present()
     int cw = rc.right - rc.left, ch = rc.bottom - rc.top;
     if (cw <= 0 || ch <= 0)
         return;
+    // 4:3 letterbox; with --integer only whole multiples of 640x480
     int w = cw, h = cw * GFX_H / GFX_W;
     if (h > ch) {
         h = ch;
         w = ch * GFX_W / GFX_H;
     }
+    int n = std::min(w / GFX_W, h / GFX_H);   // integer part of the scale
+    if (g_opts.integer_scale && n >= 1) {
+        w = GFX_W * n;
+        h = GFX_H * n;
+    }
+    glBindTexture(GL_TEXTURE_2D, g_gl_tex);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GFX_W, GFX_H, GL_BGRA_EXT, GL_UNSIGNED_BYTE, g_rgb.data());
+
+    // Sharp bilinear: nearest-neighbour upscale by the integer factor, then a
+    // smooth (bilinear) resize for the remaining fraction.  Plain nearest at a
+    // fractional scale (e.g. 2.25x on 1080p) makes rows 2 or 3 pixels high,
+    // which shimmers whenever the picture scrolls.
+    const bool exact = (w == GFX_W * n && h == GFX_H * n) || n < 1;
+    bool sharp = !g_opts.nearest && !exact;
+    if (sharp) {
+        int tw = pow2_at_least(GFX_W * n), th = pow2_at_least(GFX_H * n);
+        if (tw > g_gl_max_tex || th > g_gl_max_tex) {
+            sharp = false;
+        } else if (tw != g_gl_tex2_w || th != g_gl_tex2_h) {
+            if (!g_gl_tex2)
+                glGenTextures(1, &g_gl_tex2);
+            glBindTexture(GL_TEXTURE_2D, g_gl_tex2);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, nullptr);
+            if (glGetError() != GL_NO_ERROR) {
+                sharp = false;
+                g_gl_tex2_w = g_gl_tex2_h = 0;
+            } else {
+                g_gl_tex2_w = tw;
+                g_gl_tex2_h = th;
+            }
+        }
+    }
+    if (sharp) {
+        // pass 1: integer nearest upscale into the corner of the back buffer
+        glViewport(0, 0, GFX_W * n, GFX_H * n);
+        gl_quad(g_gl_tex, GFX_W / 1024.f, GFX_H / 512.f, true);
+        glBindTexture(GL_TEXTURE_2D, g_gl_tex2);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, GFX_W * n, GFX_H * n);
+    }
     glViewport(0, 0, cw, ch);
     glClearColor(0.f, 0.f, 0.f, 1.f);
     glClear(GL_COLOR_BUFFER_BIT);
     glViewport((cw - w) / 2, (ch - h) / 2, w, h);
-    glBindTexture(GL_TEXTURE_2D, g_gl_tex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, GFX_W, GFX_H, GL_BGRA_EXT, GL_UNSIGNED_BYTE, g_rgb.data());
-    const float u = GFX_W / 1024.f, v = GFX_H / 512.f;
-    glBegin(GL_QUADS);
-    glTexCoord2f(0, v); glVertex2f(-1, -1);
-    glTexCoord2f(u, v); glVertex2f(1, -1);
-    glTexCoord2f(u, 0); glVertex2f(1, 1);
-    glTexCoord2f(0, 0); glVertex2f(-1, 1);
-    glEnd();
+    if (sharp)
+        gl_quad(g_gl_tex2, (float)(GFX_W * n) / g_gl_tex2_w, (float)(GFX_H * n) / g_gl_tex2_h, false);
+    else
+        gl_quad(g_gl_tex, GFX_W / 1024.f, GFX_H / 512.f, true);
     SwapBuffers(g_gl_dc);
 }
 
@@ -204,11 +277,17 @@ void set_fullscreen(bool fs, bool initial = false)
         if (r.right - r.left < 320) {
             RECT wa;
             SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
-            // largest 0.5x step that fits in 85% of the work area (1.5x on 1080p)
+            // largest integer scale whose framed window fits the work area
+            // (2x on 1080p); 1.5x / 1x when even 2x does not fit
             int half_steps = 2;
-            while ((half_steps + 1) * GFX_W / 2 <= (wa.right - wa.left) * 85 / 100 &&
-                   (half_steps + 1) * GFX_H / 2 <= (wa.bottom - wa.top) * 85 / 100)
-                ++half_steps;
+            for (int hs = 2; hs <= 16; ++hs) {
+                if (hs % 2 && hs > 3)
+                    continue;   // only 1x, 1.5x and whole multiples
+                RECT t{0, 0, GFX_W * hs / 2, GFX_H * hs / 2};
+                AdjustWindowRect(&t, WS_OVERLAPPEDWINDOW, FALSE);
+                if (t.right - t.left <= wa.right - wa.left && t.bottom - t.top <= wa.bottom - wa.top)
+                    half_steps = hs;
+            }
             r = {0, 0, GFX_W * half_steps / 2, GFX_H * half_steps / 2};
             AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
             int ww = r.right - r.left, wh = r.bottom - r.top;
