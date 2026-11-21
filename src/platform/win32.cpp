@@ -813,6 +813,12 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE, LPSTR, int)
     if (argv)
         LocalFree(argv);
     test_parse_args(args);
+    // --trace from cmd.exe: print to the console the game was started from
+    // (a GUI program has no stdout of its own).  "start /wait KiruBill.exe --trace"
+    if (g_opts.trace && (AttachConsole(ATTACH_PARENT_PROCESS) || AllocConsole())) {
+        std::freopen("CONOUT$", "w", stdout);
+        std::freopen("CONOUT$", "w", stderr);
+    }
 
     set_working_directory_to_exe();
     make_dpi_aware();

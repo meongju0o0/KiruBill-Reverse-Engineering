@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 #include <ctime>
 
 PlatOptions g_opts;
@@ -15,6 +16,17 @@ uint32_t g_rand_seed = 1;     // 0x41e7b8
 
 namespace {
 bool g_quit = false;          // 0x41fa90
+
+// --trace: wall-clock time of each start-up phase
+std::chrono::steady_clock::time_point g_t0 = std::chrono::steady_clock::now();
+void trace_phase(const char* what)
+{
+    if (!g_opts.trace)
+        return;
+    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g_t0).count();
+    std::printf("[%8.1f ms] %s\n", ms, what);
+    std::fflush(stdout);
+}
 }
 
 // 0x4108e0: DestroyWindow -> WM_DESTROY -> PostQuitMessage
@@ -37,21 +49,26 @@ static bool app_init()
         plat_error(STR_41e794);   // 入力機器の初期化に失敗！
         return false;
     }
+    trace_phase("input ready");
     if (!snd_init()) {
         plat_error(STR_41e770);   // ダイレクトサウンドの初期化に失敗！
         return false;
     }
+    trace_phase("DirectSound ready");
     if (!mus_init()) {
         plat_error(STR_41e748);   // ダイレクトミュージックの初期化に失敗！
         return false;
     }
+    trace_phase("MIDI ready");
     // 0x410960 switches the window to its full screen style.
     if (!gfx_init()) {
         plat_error(STR_41e724);   // ダイレクトドロウの初期化に失敗！
         return false;
     }
     gfx_load_palette("image/game.pal");
+    trace_phase("palette ready, loading resources (loading screen)");
     f_40b5f0();                   // load resources, set the first scene
+    trace_phase("resources loaded");
     return true;
 }
 
@@ -88,10 +105,12 @@ int app_run()
     // binding lists) and 0x413120 (wave reader) are engine objects here.
     f_40b550();
     // 0x410a40: the window exists before the devices are initialised.
+    trace_phase("start");
     if (!plat_video_init()) {
         plat_error(STR_41e724);
         return 0;
     }
+    trace_phase("window ready");
     if (!app_init()) {
         app_shutdown();
         return 0;
